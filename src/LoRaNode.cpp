@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include <QMC5883L.h>
 
+
 #define DEBUG_ESP_PORT Serial
 #ifdef DEBUG_ESP_PORT
 #define DEBUG_MSG(...) DEBUG_ESP_PORT.printf( __VA_ARGS__ )
@@ -16,9 +17,9 @@
 // Node name displayed on the screen
 const char* LORA_NODE_NAME = "NODE_01";
 // node data transmission interval in ms
-const int transmissionTimeInterval = 5000;
+const int transmissionTimeInterval = 10000;
 // node processing time interval
-const int processingTimeInterval = 2000;
+const int processingTimeInterval = 5000;
 
 
 // -------------------------------------------------------
@@ -26,7 +27,15 @@ const int processingTimeInterval = 2000;
 // -------------------------------------------------------
 
 QMC5883L compass;
+// reed swich management
+const int reedSwitchPin = 13;
+unsigned long lastChangeTime = 0;
+unsigned long debounceDelay = 50;
+bool reedSwitchState = false;
+// mail avaialble ?
+bool mail = false;
 
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 /**
 * LoRaNode Constructor. Empty
@@ -111,6 +120,35 @@ char* LoRaNode::GetLineToDisplay(byte lineNumber)
   return (char*) msg.c_str();
 }
 
+void IRAM_ATTR __ISR_reedSwitch()
+{
+  const boolean readState = !digitalRead(reedSwitchPin);
+  // debounce interrupt
+  if (readState != reedSwitchState)
+  {
+    if (millis() > lastChangeTime + debounceDelay)
+    {
+      portENTER_CRITICAL(&mux);
+      reedSwitchState = readState;
+      portEXIT_CRITICAL_ISR(&mux);
+      //changeFlag = true;
+      if (reedSwitchState)
+      {
+        DEBUG_MSG("Reed Active\n");
+        reedSwitchState = true;
+        // reed becomes active ... means that letters box has been open / close
+        mail = true;
+      }
+      else
+      {
+        DEBUG_MSG("Reed Not Active\n");
+        reedSwitchState = false;
+      }
+    }
+    lastChangeTime = millis();
+  }
+}
+
 /**
 * Function invoked by the node right after its own setup (as per Arduino Setup function)
 * To be used for applicative setup
@@ -119,8 +157,10 @@ void LoRaNode::AppSetup()
 {
   Wire.begin();
   compass.init();
-  // compass.resetCalibration();
   compass.setSamplingRate(50);
+  pinMode(reedSwitchPin, INPUT_PULLUP);
+  reedSwitchState = !digitalRead(reedSwitchPin);
+  attachInterrupt(digitalPinToInterrupt(reedSwitchPin), __ISR_reedSwitch, CHANGE);
 }
 
 /**
@@ -168,8 +208,9 @@ void LoRaNode::AppProcessing()
   if ((heading >=114)and (heading <= 158)) { DEBUG_MSG (" * South-East\n");lastHeading="SE"; }
   if ((heading >=159)and (heading <= 203)) { DEBUG_MSG (" * South\n");lastHeading="S"; }
   if ((heading >=204)and (heading <= 248)) { DEBUG_MSG (" * South-West\n");lastHeading="SW"; }
-  if ((heading >=249)and (heading <= 293)) { DEBUG_MSG (" * West\n");lastHeading="O"; }
+  if ((heading >=249)and (heading <= 293)) { DEBUG_MSG (" * West\n");lastHeading="W"; }
   if ((heading >=294)and (heading <= 339)) { DEBUG_MSG (" * North-West\n");lastHeading="NW"; }
+
 }
 
 /**
@@ -180,6 +221,10 @@ void LoRaNode::AddJSON_TxPayload(JsonDocument payload)
 {
   payload["pulse_counter"] = TxCounter;
   payload["heading"] = lastHeading;
+  portENTER_CRITICAL(&mux);
+  payload["mail"] = mail;
+  if (true == mail) { mail = false;} // mail notification sent. We cancel it.
+  portEXIT_CRITICAL(&mux);
 }
 
 /**
