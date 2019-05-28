@@ -648,7 +648,10 @@ void LoRaClass::handleDio0Rise()
     }
 
     // reset FIFO address
-    writeRegister(REG_FIFO_ADDR_PTR, 0);
+    // this should be removed according to the pull request on the net
+    // https://github.com/sandeepmistry/arduino-LoRa/issues/218
+    // https://github.com/sandeepmistry/arduino-LoRa/issues/222
+    // writeRegister(REG_FIFO_ADDR_PTR, 0);
   }
 }
 
