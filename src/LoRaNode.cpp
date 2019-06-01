@@ -10,6 +10,7 @@
 #define DEBUG_MSG(...)
 #endif
 
+volatile bool displayNeedRefresh = false;
 
 // -------------------------------------------------------
 // NODE USER CONFIGURATION
@@ -89,21 +90,17 @@ char* LoRaNode::GetLineToDisplay(byte lineNumber)
       msg = "*Heading ";
       msg += lastHeading;
     break;
-    // Tx Line 2
     case 2:
+      msg = "*Reed switch ";
+      msg += (reedSwitchState == true) ? "ON " : "OFF";
     break;
-    // Tx Line 3
     case 3:
       // user custom message or by default the number of message sent
       msg = "*TxCounter ";
       msg += TxCounter;
     break;
-    // Rx Line 1
     case 4 :
-      msg = ">To ";
-      msg += LORA_NODE_NAME;
       break;
-    // Rx Line 2
     case 5:
       if (calibrating)
       {
@@ -114,8 +111,10 @@ char* LoRaNode::GetLineToDisplay(byte lineNumber)
         msg = "";
       }
     break;
+    case 6:
+      break;
     default:
-    break;
+      break;
   }
   return (char*) msg.c_str();
 }
@@ -144,6 +143,7 @@ void IRAM_ATTR __ISR_reedSwitch()
         DEBUG_MSG("Reed Not Active\n");
         reedSwitchState = false;
       }
+      displayNeedRefresh = true;
     }
     lastChangeTime = millis();
   }
@@ -177,11 +177,6 @@ void LoRaNode::AppProcessing()
   DEBUG_MSG("x: %i",x);
   DEBUG_MSG("    y: %i",y);
   DEBUG_MSG("    z: %i",z);
-  // int heading = atan2(x, y)/0.0174532925; //Calculate the degree using X and Y parameters with this formulae
-  // //Convert result into 0 to 360
-  // if(heading < 0)
-  //  heading+=360;
-  // heading = 360-heading;
   int heading = 0;
   if (calibrating)
   {
@@ -201,7 +196,6 @@ void LoRaNode::AppProcessing()
     DEBUG_MSG(" ... ");
     heading = compass.readHeading();
   }
-
   if ((heading >=340)or (heading <= 23)) { DEBUG_MSG (" * North\n");lastHeading="N"; }
   if ((heading >=24) and (heading <= 68)) { DEBUG_MSG (" * North-East\n");lastHeading="NE"; }
   if ((heading >=69) and (heading <= 113)) { DEBUG_MSG (" * East\n");lastHeading="E"; }
@@ -210,7 +204,17 @@ void LoRaNode::AppProcessing()
   if ((heading >=204)and (heading <= 248)) { DEBUG_MSG (" * South-West\n");lastHeading="SW"; }
   if ((heading >=249)and (heading <= 293)) { DEBUG_MSG (" * West\n");lastHeading="W"; }
   if ((heading >=294)and (heading <= 339)) { DEBUG_MSG (" * North-West\n");lastHeading="NW"; }
+  displayNeedRefresh = true;
+}
 
+bool LoRaNode::NeedDisplayUpdate()
+{
+  if (displayNeedRefresh)
+  {
+    displayNeedRefresh = false;
+    return true;
+  }
+  return false;
 }
 
 /**
