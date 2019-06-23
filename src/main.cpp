@@ -51,7 +51,7 @@
 // LoRa DATA MODEL CONFIGURATION
 // -------------------------------------------------------
 const char* L2M_NODE_NAME = "node";
-
+#define LORA_MSG_MAX_SIZE 255
 
 // the OLED used
 U8X8_SSD1306_128X64_NONAME_SW_I2C u8x8(/* clock=*/ 15, /* data=*/ 4, /* reset=*/ 16);
@@ -139,6 +139,28 @@ void setup()
   Node.AppSetup();
 }
 
+uint16_t crc16_ccitt(char* data, unsigned int data_len) {
+    uint16_t crc = 0xFFFF;
+
+    if (data_len == 0)
+        return 0;
+
+    for (unsigned int i = 0; i < data_len; ++i) {
+        uint16_t dbyte = data[i];
+        crc ^= dbyte << 8;
+        
+        for (unsigned char j = 0; j < 8; ++j) {
+            uint16_t mix = crc & 0x8000;
+            crc = (crc << 1);
+            if (mix)
+                crc = crc ^ 0x1021;
+        }
+    }
+
+    return crc;
+}
+
+
 /**
 * [sendToLora2MQTTGateway description]
 */
@@ -151,7 +173,18 @@ void sendToLora2MQTTGateway()
   Node.AddJSON_TxPayload(payload);
   LoRa_txMode();
   LoRa.beginPacket();
-  serializeJson(payload, LoRa);
+  char TXBuffer[LORA_MSG_MAX_SIZE];
+  unsigned int crc16;
+  serializeJson(payload, TXBuffer);
+  DEBUG_MSG("sendToLora2MQTTGateway: payload = %s\n", TXBuffer);
+  crc16 = crc16_ccitt(TXBuffer, strlen(TXBuffer));
+  // serialize json payload
+  //serializeJson(payload, LoRa);
+  LoRa.print(TXBuffer);
+  // add crc after the json payload
+  LoRa.write((uint8_t)(crc16 & 0xff));
+  LoRa.write((uint8_t)((crc16 >> 8) & 0xff));
+  DEBUG_MSG("sendToLora2MQTTGateway: CRC = %x\n", crc16);
   LoRa.endPacket();
   LoRa_rxMode();
   // increment TxCounter
