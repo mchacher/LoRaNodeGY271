@@ -51,6 +51,7 @@
 // LoRa DATA MODEL CONFIGURATION
 // -------------------------------------------------------
 const char* L2M_NODE_NAME = "node";
+const char* L2M_ACK = "ack";
 #define LORA_MSG_MAX_SIZE 255
 
 // the OLED used
@@ -160,6 +161,51 @@ uint16_t crc16_ccitt(char* data, unsigned int data_len) {
     return crc;
 }
 
+bool receiveAck()
+{
+  int ackStartWaitingTime = millis();
+  //try to parse packet
+  int packetSize = LoRa.parsePacket();
+  // wait for 5s max
+  while (((millis() - ackStartWaitingTime) < 5) && (packetSize == 0))
+  {
+    packetSize = LoRa.parsePacket();
+    if (packetSize > 0)
+    {
+      // parse JSON message
+      StaticJsonDocument<255> payload;
+      DeserializationError error = deserializeJson(payload, LoRa);
+      // deserializeJson error
+      if (error || (payload[L2M_NODE_NAME].isNull() == true))
+      {
+        DEBUG_MSG("receiveAck: deserializeJson error\n");
+        //u8x8.drawString(0, 2, "Rx Error");
+        while(LoRa.read() != -1){}; // flush Rx Buffer
+        return false;
+      }
+      // no error we can process the message
+      else
+      {
+        String nodeInvoked = payload[L2M_NODE_NAME];
+        // Am I the node invoked for this messages
+        if (nodeInvoked.compareTo(Node.GetNodeName()) == 0)
+        {
+          // I am the one!
+          DEBUG_MSG("-tonode %s\n", nodeInvoked.c_str());
+          int ack = payload[L2M_ACK];
+          if (ack == Node.TxCounter) return true;
+          else return false;
+        }
+        else
+        {
+          packetSize = 0; // to loop again
+        }
+      }
+    }
+  }
+  return false;
+}
+
 
 /**
 * [sendToLora2MQTTGateway description]
@@ -170,6 +216,7 @@ void sendToLora2MQTTGateway()
   StaticJsonDocument<255> payload;
   // preparing JSON payload
   payload[L2M_NODE_NAME] = Node.GetNodeName();
+  payload["pulse_counter"] = Node.TxCounter;
   Node.AddJSON_TxPayload(payload);
   LoRa_txMode();
   LoRa.beginPacket();
@@ -184,9 +231,28 @@ void sendToLora2MQTTGateway()
   // add crc after the json payload
   LoRa.write((uint8_t)(crc16 & 0xff));
   LoRa.write((uint8_t)((crc16 >> 8) & 0xff));
-  DEBUG_MSG("sendToLora2MQTTGateway: CRC = %x\n", crc16);
   LoRa.endPacket();
+  // switch to rxMode to receive ACK
   LoRa_rxMode();
+  while (receiveAck() == false)
+  {
+    LoRa_txMode();
+    LoRa.beginPacket();
+    char TXBuffer[LORA_MSG_MAX_SIZE];
+    unsigned int crc16;
+    serializeJson(payload, TXBuffer);
+    DEBUG_MSG("sendToLora2MQTTGateway: payload = %s\n", TXBuffer);
+    crc16 = crc16_ccitt(TXBuffer, strlen(TXBuffer));
+    // serialize json payload
+    //serializeJson(payload, LoRa);
+    LoRa.print(TXBuffer);
+    // add crc after the json payload
+    LoRa.write((uint8_t)(crc16 & 0xff));
+    LoRa.write((uint8_t)((crc16 >> 8) & 0xff));
+    LoRa.endPacket();
+      // switch to rxMode to receive ACK
+    LoRa_rxMode();
+  }
   // increment TxCounter
   Node.TxCounter++;
   digitalWrite(LED_WHITE, LOW);

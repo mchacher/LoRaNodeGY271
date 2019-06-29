@@ -223,7 +223,6 @@ bool LoRaNode::NeedDisplayUpdate()
 */
 void LoRaNode::AddJSON_TxPayload(JsonDocument payload)
 {
-  payload["pulse_counter"] = TxCounter;
   payload["heading"] = lastHeading;
   portENTER_CRITICAL(&mux);
   payload["mail"] = mail;
