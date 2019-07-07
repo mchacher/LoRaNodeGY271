@@ -18,9 +18,9 @@ volatile bool displayNeedRefresh = false;
 // Node name displayed on the screen
 const char* LORA_NODE_NAME = "NODE_01";
 // node data transmission interval in ms
-const int transmissionTimeInterval = 10000;
+const int transmissionTimeInterval = 3000;
 // node processing time interval
-const int processingTimeInterval = 5000;
+const int processingTimeInterval = 1000;
 
 
 // -------------------------------------------------------

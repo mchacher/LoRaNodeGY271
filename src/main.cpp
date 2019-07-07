@@ -51,8 +51,10 @@
 // LoRa DATA MODEL CONFIGURATION
 // -------------------------------------------------------
 const char* L2M_NODE_NAME = "node";
-const char* L2M_ACK = "ack";
+const char* L2M_NODE_TX_COUNTER = "#tx";
+const char* L2M_NODE_ACK = "ack";
 #define LORA_MSG_MAX_SIZE 255
+#define ACK_TIMEOUT 5000 // 5s max to receive an Ack
 
 // the OLED used
 U8X8_SSD1306_128X64_NONAME_SW_I2C u8x8(/* clock=*/ 15, /* data=*/ 4, /* reset=*/ 16);
@@ -167,7 +169,11 @@ bool receiveAck()
   //try to parse packet
   int packetSize = LoRa.parsePacket();
   // wait for 5s max
-  while (((millis() - ackStartWaitingTime) < 5) && (packetSize == 0))
+
+  // switch to rxMode to receive ACK
+  LoRa_rxMode();
+
+  while (((millis() - ackStartWaitingTime) < ACK_TIMEOUT) && (packetSize == 0))
   {
     packetSize = LoRa.parsePacket();
     if (packetSize > 0)
@@ -191,10 +197,18 @@ bool receiveAck()
         if (nodeInvoked.compareTo(Node.GetNodeName()) == 0)
         {
           // I am the one!
-          DEBUG_MSG("-tonode %s\n", nodeInvoked.c_str());
-          int ack = payload[L2M_ACK];
-          if (ack == Node.TxCounter) return true;
-          else return false;
+          DEBUG_MSG("receiveAck: I am the node invoked\n");
+          int ack = payload[L2M_NODE_ACK];
+          if (ack == Node.TxCounter)
+          {
+            DEBUG_MSG("receiveAck: good ack received!\n");
+            return true;
+          }
+          else
+          {
+            DEBUG_MSG("receiveAck: bad ack received!\n");
+            return false;
+          } 
         }
         else
         {
@@ -203,6 +217,7 @@ bool receiveAck()
       }
     }
   }
+  DEBUG_MSG("receiveAck: no ACK received\n");
   return false;
 }
 
@@ -212,47 +227,34 @@ bool receiveAck()
 */
 void sendToLora2MQTTGateway()
 {
-  digitalWrite(LED_WHITE, HIGH);
-  StaticJsonDocument<255> payload;
-  // preparing JSON payload
-  payload[L2M_NODE_NAME] = Node.GetNodeName();
-  payload["pulse_counter"] = Node.TxCounter;
-  Node.AddJSON_TxPayload(payload);
-  LoRa_txMode();
-  LoRa.beginPacket();
   char TXBuffer[LORA_MSG_MAX_SIZE];
   unsigned int crc16;
+  StaticJsonDocument<255> payload;
+
+  // light on white LED
+  digitalWrite(LED_WHITE, HIGH);
+  
+  // preparing JSON payload
+  payload[L2M_NODE_NAME] = Node.GetNodeName();
+  payload[L2M_NODE_TX_COUNTER] = Node.TxCounter;
+  Node.AddJSON_TxPayload(payload);
   serializeJson(payload, TXBuffer);
-  DEBUG_MSG("sendToLora2MQTTGateway: payload = %s\n", TXBuffer);
   crc16 = crc16_ccitt(TXBuffer, strlen(TXBuffer));
-  // serialize json payload
-  //serializeJson(payload, LoRa);
-  LoRa.print(TXBuffer);
-  // add crc after the json payload
-  LoRa.write((uint8_t)(crc16 & 0xff));
-  LoRa.write((uint8_t)((crc16 >> 8) & 0xff));
-  LoRa.endPacket();
-  // switch to rxMode to receive ACK
-  LoRa_rxMode();
-  while (receiveAck() == false)
+
+  // send the LoRa message until valid ack is received
+  do 
   {
+    DEBUG_MSG("sendToLora2MQTTGateway: sending LoRa message to LoRa2MQTT gateway\n");
     LoRa_txMode();
     LoRa.beginPacket();
-    char TXBuffer[LORA_MSG_MAX_SIZE];
-    unsigned int crc16;
-    serializeJson(payload, TXBuffer);
-    DEBUG_MSG("sendToLora2MQTTGateway: payload = %s\n", TXBuffer);
-    crc16 = crc16_ccitt(TXBuffer, strlen(TXBuffer));
-    // serialize json payload
-    //serializeJson(payload, LoRa);
     LoRa.print(TXBuffer);
     // add crc after the json payload
     LoRa.write((uint8_t)(crc16 & 0xff));
     LoRa.write((uint8_t)((crc16 >> 8) & 0xff));
     LoRa.endPacket();
-      // switch to rxMode to receive ACK
-    LoRa_rxMode();
   }
+  while ((receiveAck() == false));
+
   // increment TxCounter
   Node.TxCounter++;
   digitalWrite(LED_WHITE, LOW);
